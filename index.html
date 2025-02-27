@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>자동 완성 테스트 페이지</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #f9f9f9;
+        }
+        #search-container {
+            position: relative;
+            width: 600px;
+        }
+        #textarea {
+            padding: 12px;
+            width: 100%;
+            height: 150px;
+            border: 1px solid #888;
+            border-radius: 8px;
+            font-size: 16px;
+            outline: none;
+            resize: none; /* 크기 조절 비활성화 */
+        }
+        #textarea:focus {
+            border: 1px solid #007BFF;
+            box-shadow: 0 0 5px rgba(0, 123, 255, 0.5);
+        }
+        #suggestions {
+            border: 1px solid #ddd;
+            max-height: 200px;
+            overflow-y: auto;
+            display: none;
+            position: absolute;
+            background-color: white;
+            z-index: 1000;
+            width: 100%;
+            border-radius: 4px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .suggestion-item {
+            padding: 12px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .suggestion-item:hover {
+            background-color: #f0f0f0;
+        }
+        /* 현재 키보드로 선택된(활성화된) 항목에 적용할 스타일 */
+        .active {
+            background-color: #007BFF;
+            color: #fff;
+        }
+    </style>
+</head>
+<body>
+    <div id="search-container">
+        <textarea id="textarea" placeholder="글을 입력하세요..." autocomplete="off"></textarea>
+        <div id="suggestions"></div>
+    </div>
+
+    <script>
+        const textarea = document.getElementById('textarea');
+        const suggestionsContainer = document.getElementById('suggestions');
+
+        let debounceTimer;
+        const DEBOUNCE_DELAY = 300;
+
+        // "현재 선택된 자동완성 항목"을 추적하는 인덱스 (없으면 -1)
+        let activeIndex = -1;
+        // 현재 화면에 표시된 자동완성 항목들 (DOM 요소 목록)
+        let suggestionItems = [];
+
+        // 1) textarea에 입력될 때 디바운싱으로 handleInput 함수 호출
+        textarea.addEventListener('input', function () {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => handleInput(textarea.value), DEBOUNCE_DELAY);
+        });
+
+        // 2) 키보드 이벤트 처리: Tab(항목 이동), Enter(확정)
+        textarea.addEventListener('keydown', function (e) {
+            // 자동완성 목록이 표시되지 않은 상태라면 무시
+            const isSuggestionsVisible = (suggestionsContainer.style.display === 'block');
+            if (!isSuggestionsVisible) return;
+
+            // suggestionItems가 비어있으면 아무 동작 안 함
+            if (suggestionItems.length === 0) return;
+
+            // (A) 탭(Tab) 키: 현재 선택된 항목을 아래로 이동
+            if (e.key === 'Tab') {
+                e.preventDefault(); // textarea에 탭 입력되지 않도록 막기
+
+                // 다음 인덱스로 이동 (마지막 다음이면 처음으로)
+                activeIndex++;
+                if (activeIndex >= suggestionItems.length) {
+                    activeIndex = 0;
+                }
+
+                // 하이라이트 갱신
+                updateActiveItem();
+            }
+
+            // (B) 엔터(Enter) 키: 현재 선택된 항목을 textarea에 붙이기
+            if (e.key === 'Enter') {
+                e.preventDefault(); // textarea 줄바꿈 방지
+
+                // 만약 아무 항목도 선택되지 않았다면(-1) 아무 것도 안 함
+                if (activeIndex < 0) return;
+
+                // 선택된 항목 내용 붙이고 닫기
+                const selectedText = suggestionItems[activeIndex].textContent;
+                textarea.value += selectedText;
+                suggestionsContainer.style.display = 'none';
+            }
+        });
+
+        // 3) 서버 요청 및 자동완성 로직
+        async function handleInput(inputValue) {
+            // 공백 단위로 나누어 "마지막 단어"를 query로
+            if (inputValue.trim().length < 2) {
+                suggestionsContainer.style.display = 'none';
+                return;
+            }
+
+            const words = inputValue.trim().split(/\s+/);
+            const query = words[words.length - 1];
+
+            // query가 너무 짧으면 (예: 1글자) 자동완성 숨김
+            if (query.length < 2) {
+                suggestionsContainer.style.display = 'none';
+                return;
+            }
+
+            try {
+                // 실제 서버(예: Elasticsearch)에 쿼리 날리는 예시
+                // local 서버라면 주소, 인덱스, 필드명(suggest)은 바꿔서 사용
+                const response = await fetch('http://localhost:4312/seoul_autocom/_search', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        query: {
+                            match: {
+                                suggest: query
+                            }
+                        },
+                        size: 10
+                    })
+                });
+
+                const data = await response.json();
+                // -------------- 중복 제거 로직 추가 --------------
+                // 1) _source.suggest 배열을 수집
+                const rawSuggestions = data.hits.hits.map(item => item._source.suggest);
+
+                // 2) Set을 이용해 중복 제거
+                const uniqueSuggestions = [...new Set(rawSuggestions)];
+
+                // 3) 화면 표시
+                displaySuggestions(query, uniqueSuggestions);
+            } catch (error) {
+                console.error('Error fetching suggestions:', error);
+                // 실제 서비스에선 사용자에게 안내 메시지 표시할 수 있음
+            }
+        }
+
+        // 4) 자동완성 목록 표시
+        function displaySuggestions(query, suggestions) {
+            suggestionsContainer.innerHTML = '';
+
+            if (suggestions.length === 0) {
+                suggestionsContainer.style.display = 'none';
+                return;
+            }
+
+            // 매번 렌더링할 때마다 activeIndex를 초기화(-1)
+            activeIndex = -1;
+            suggestionItems = [];
+
+            suggestions.forEach(item => {
+                // 예: item에 query가 "서울"이라면, 그 뒤 remainder만 추출 가능
+                const index = item.indexOf(query);
+                const remainder = (index !== -1)
+                    ? item.substring(index + query.length).trim()
+                    : item;
+
+                // remainder가 없으면 굳이 표시 안 하는 로직
+                // (실제로는 item 전체를 표시해도 됨)
+                if (remainder) {
+                    const suggestionItem = document.createElement('div');
+                    suggestionItem.className = 'suggestion-item';
+                    suggestionItem.textContent = remainder;
+
+                    // 클릭 시 textarea에 붙이기
+                    suggestionItem.onclick = () => {
+                        textarea.value += remainder;
+                        suggestionsContainer.style.display = 'none';
+                    };
+
+                    suggestionsContainer.appendChild(suggestionItem);
+                }
+            });
+
+            // suggestionsContainer에 추가된 실제 항목들을 배열로 참조
+            suggestionItems = Array.from(suggestionsContainer.querySelectorAll('.suggestion-item'));
+
+            // 처음 표시할 때는 아무 항목도 활성화(-1)이 아님
+            suggestionsContainer.style.display = 'block';
+        }
+
+        // 5) activeIndex 변경 시, 실제 화면에 반영하는 함수
+        function updateActiveItem() {
+            // 모든 항목에서 .active 제거
+            suggestionItems.forEach(item => {
+                item.classList.remove('active');
+            });
+
+            // activeIndex가 유효 범위이면 해당 항목 .active 추가
+            if (activeIndex >= 0 && activeIndex < suggestionItems.length) {
+                suggestionItems[activeIndex].classList.add('active');
+            }
+        }
+
+        // 6) textarea 및 자동완성 목록 바깥 클릭 시 목록 닫기
+        document.addEventListener('click', function (event) {
+            if (!textarea.contains(event.target) && !suggestionsContainer.contains(event.target)) {
+                suggestionsContainer.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>
