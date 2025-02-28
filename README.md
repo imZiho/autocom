@@ -10,17 +10,6 @@
 ## 2. 프로젝트 
 **뉴스 기사에서 자주 사용되는 상투적 표현을 자동완성**하는 **Elasticsearch 기반의 시스템**입니다.**빠르게 상투적표현을 자동완성**할 수 있도록 도와줍니다. **Elasticsearch 기반 자동완성에서 LLM(GPT-4, KoBERT 등)을 활용하여 문맥적인 적절성을 높이는 실험** 진행 예정입니다.
 
-📂 project
- ┣ 📂 src
- ┃ ┣ 📜 main.py               
- ┃ ┣ 📜 autocomplete_manager.py # 자동완성 관련 기능
- ┃ ┣ 📜 config.py              # 환경 변수 설정
- ┣ 📂 data
- ┃ ┗ 📜 sample_data.txt       # 상투적표현 모은 데이터
- ┣ 📜 requirements.txt        # 필수 패키지 목록
- ┣ 📜 .env                    # 환경 변수 설정 파일
- ┗ 📜 README.md               # 실행 방법 설명 파일
-
 ---
 
 ## 3. 주요 기능
@@ -230,5 +219,5 @@ python autocomplete_manager.py autocomplete jiho "될 것으로"
 git clone https://github.com/imZiho/autocom.git
 cd autocom
 
+### **실행 후 출력 확인**
 python autocomplete_manager.py autocomplete jiho "될 것으로"
-이런식으로 코드 실행 후 출력 결과물 확인
